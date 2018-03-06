@@ -242,4 +242,4 @@ def get_gene_info(path, annotation_type="ID"):
     if file_extension.lower() in [".gff", ".gff3"]:
         return tnseq.get_gene_info_gff(path, annotation_type=annotation_type)
     else:
-        return tnseq.get_gene_info_pt(path, annotation_type=annotation_type)
+        return tnseq.get_gene_info_pt(path)
