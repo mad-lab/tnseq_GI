@@ -26,7 +26,7 @@ def HDI_from_MCMC(posterior_samples, credible_mass=0.95):
     for i in range(0, nCIs):
         ciWidth[i] = sorted_points[i + ciIdxInc] - sorted_points[i]
     HDImin = sorted_points[ciWidth.index(min(ciWidth))]
-    HDImax = sorted_points[ciWidth.index(min(ciWidth))+ciIdxInc]
+    HDImax = sorted_points[ciWidth.index(min(ciWidth)) + ciIdxInc]
     return(HDImin, HDImax)
 
 
@@ -105,6 +105,7 @@ def usage():
                             Example: -debug Rv0001,Rv3910c
         -l <string>     :=  Label to use when saving files in debug mode.
         -t <string>     :=  Annotation type to use (ID by default.)
+        -o <string>     :=  File to which to write output
 """ % sys.argv[0])
 
 
@@ -138,12 +139,15 @@ def main(args, kwargs, quite=False, jumble=False):
     annotation = kwargs["pt"]
     rope = float(kwargs.get("rope", 0.5))
     S = int(kwargs.get("s", 100000))
+    if S < 20:
+        error("This requires a minimum number of monte carlo estimates to run.")
     norm_method = kwargs.get("n", "TTR")
     label = kwargs.get("l", "debug")
     onlyNZ = kwargs.get("-nz", False)
     doBFDR = kwargs.get("-bfdr", False)
     doFWER = kwargs.get("-fwer", False)
     annotation_type = kwargs.get("t", "ID")
+    output = kwargs.get("o", False)
     DEBUG = []
     if "debug" in kwargs:
         DEBUG = kwargs["debug"].split(",")
@@ -264,28 +268,32 @@ def main(args, kwargs, quite=False, jumble=False):
             #  Strain-B     B       D
 
             try:
-                muA1_post, varA1_post = sample_post(A1_data, S, mu0_A1, s20_A1, k0, nu0)
-                muB1_post, varB1_post = sample_post(B1_data, S, mu0_B1, s20_B1, k0, nu0)
-                muA2_post, varA2_post = sample_post(A2_data, S, mu0_A2, s20_A2, k0, nu0)
-                muB2_post, varB2_post = sample_post(B2_data, S, mu0_B2, s20_B2, k0, nu0)
+                muA1_post, varA1_post = sample_post(A1_data, S, mu0_A1,
+                                                    s20_A1, k0, nu0)
+                muB1_post, varB1_post = sample_post(B1_data, S, mu0_B1,
+                                                    s20_B1, k0, nu0)
+                muA2_post, varA2_post = sample_post(A2_data, S, mu0_A2,
+                                                    s20_A2, k0, nu0)
+                muB2_post, varB2_post = sample_post(B2_data, S, mu0_B2,
+                                                    s20_B2, k0, nu0)
             except Exception as e:
                 muA1_post = varA1_post = numpy.ones(S)
                 muB1_post = varB1_post = numpy.ones(S)
                 muA2_post = varA2_post = numpy.ones(S)
                 muB2_post = varB2_post = numpy.ones(S)
 
-            logFC_A_post = numpy.log2(muA2_post/muA1_post)
-            logFC_B_post = numpy.log2(muB2_post/muB1_post)
+            logFC_A_post = numpy.log2(muA2_post / muA1_post)
+            logFC_B_post = numpy.log2(muB2_post / muB1_post)
             delta_logFC_post = logFC_B_post - logFC_A_post
-
-            alpha = 0.05
+            # This is redundant, the default argument assumes this
+            # alpha = 0.05
 
             # Get Bounds of the HDI
-            l_logFC_A, u_logFC_A = HDI_from_MCMC(logFC_A_post, 1-alpha)
+            l_logFC_A, u_logFC_A = HDI_from_MCMC(logFC_A_post)
 
-            l_logFC_B, u_logFC_B = HDI_from_MCMC(logFC_B_post, 1-alpha)
+            l_logFC_B, u_logFC_B = HDI_from_MCMC(logFC_B_post)
 
-            l_delta_logFC, u_delta_logFC = HDI_from_MCMC(delta_logFC_post, 1-alpha)
+            l_delta_logFC, u_delta_logFC = HDI_from_MCMC(delta_logFC_post)
 
             mean_logFC_A = numpy.mean(logFC_A_post)
             mean_logFC_B = numpy.mean(logFC_B_post)
@@ -356,33 +364,33 @@ def main(args, kwargs, quite=False, jumble=False):
                 print(x, file=out)
 
         postprob.append(probROPE)
-        data.append((gene.orf, gene.name, gene.n, numpy.mean(muA1_post), numpy.mean(muA2_post),
-                     numpy.mean(muB1_post), numpy.mean(muB2_post), mean_logFC_A, mean_logFC_B,
-                     mean_delta_logFC, l_delta_logFC, u_delta_logFC, probROPE, not_HDI_overlap_bit))
+        data.append((gene.orf, gene.name, gene.n, numpy.mean(muA1_post),
+                     numpy.mean(muA2_post), numpy.mean(muB1_post),
+                     numpy.mean(muB2_post), mean_logFC_A, mean_logFC_B,
+                     mean_delta_logFC, l_delta_logFC, u_delta_logFC,
+                     probROPE, not_HDI_overlap_bit))
 
-    if doBFDR or not doFWER:
-        postprob = numpy.array(postprob)
-        postprob.sort()
-        bfdr = numpy.cumsum(postprob)/numpy.arange(1, len(postprob)+1)
-        adjusted_prob = bfdr
+    if doBFDR:
+        adjusted_prob = bFDR(postprob)
         adjusted_label = "BFDR"
-        if doBFDR:
-            data.sort(key=lambda x: x[-2])
-        else:
-            data.sort(key=lambda x: x[-1], reverse=True)
     elif doFWER:
-        fwer = FWER_Bayes(postprob)
-        fwer.sort()
-        adjusted_prob = fwer
+        adjusted_prob = FWER_Bayes(postprob)
         adjusted_label = "FWER"
-        data.sort(key=lambda x: x[-2])
+    else:
+        import statsmodels.stats.multitest as ssm
+        [booleans, adjusted_prob, sidaks, bonfs] = ssm.multipletests(
+            postprob, method="fdr_bh")
+        adjusted_label = "FDR"
 
-    return (data, adjusted_prob, adjusted_label)
+    print("Minimum observed adjusted_prob: ", min(adjusted_prob))
+
+    return(data, adjusted_prob, adjusted_label)
 
 
 def print_results(args, kwargs, data, adjusted_prob, adjusted_label):
     doBFDR = kwargs.get("-bfdr", False)
     doFWER = kwargs.get("-fwer", False)
+    output = kwargs.get("o", False)
 
     # Write notice of classification criteria
     print("#")
@@ -393,7 +401,12 @@ def print_results(args, kwargs, data, adjusted_prob, adjusted_label):
     print("#")
 
     # Write column names
-    sys.stdout.write("#ORF\tName\tNumber of TA Sites\tMean count (Strain A Time 1)\tMean count (Strain A Time 2)\tMean count (Strain B Time 1)\tMean count (Strain B Time 2)\tMean logFC (Strain A)\tMean logFC (Strain B) \tMean delta logFC\tLower Bound delta logFC\tUpper Bound delta logFC\tProb. of delta-logFC being within ROPE\tAdjusted Probability (%s)\tIs HDI outside ROPE?\tType of Interaction\n" % adjusted_label)
+    header = "#ORF\tName\tNumber of TA Sites\tMean count (Strain A Time 1)\tMean count (Strain A Time 2)\tMean count (Strain B Time 1)\tMean count (Strain B Time 2)\tMean logFC (Strain A)\tMean logFC (Strain B) \tMean delta logFC\tLower Bound delta logFC\tUpper Bound delta logFC\tProb. of delta-logFC being within ROPE\tAdjusted Probability (%s)\tIs HDI outside ROPE?\tType of Interaction\n" % adjusted_label
+    if output:
+        out_write = open(output, "w")
+        print(header, file=out_write)
+    else:
+        sys.stdout.write(header)
 
     # Write gene results
     for i, row in enumerate(data):
@@ -405,8 +418,12 @@ def print_results(args, kwargs, data, adjusted_prob, adjusted_label):
         elif not (doBFDR or doFWER) and not_HDI_overlap_bit:
             type_of_interaction = classify_interaction(mean_delta_logFC, mean_logFC_B, mean_logFC_A)
 
-        new_row = tuple(list(row[:-1])+[adjusted_prob[i], not_HDI_overlap_bit, type_of_interaction])
-        sys.stdout.write("%s\t%s\t%d\t%1.2f\t%1.2f\t%1.2f\t%1.2f\t%1.2f\t%1.2f\t%1.2f\t%1.2f\t%1.2f\t%1.8f\t%1.8f\t%s\t%s\n" % new_row)
+        new_row = tuple(list(row[:-1]) + [adjusted_prob[i], not_HDI_overlap_bit, type_of_interaction])
+        written_row = "%s\t%s\t%d\t%1.2f\t%1.2f\t%1.2f\t%1.2f\t%1.2f\t%1.2f\t%1.2f\t%1.2f\t%1.2f\t%1.8f\t%1.8f\t%s\t%s\n" % new_row
+        if output:
+            print(written_row, file=out_write)
+        else:
+            sys.stdout.write(written_row)
 
 
 if __name__ == "__main__":
