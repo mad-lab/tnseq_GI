@@ -314,7 +314,6 @@ class Genes:
         if file_extension.lower() in [".gff", ".gff3"]:
             isProt = False
 
-        print("Started __init__() in Genes, what is 'isProt':", isProt)
         self.orf2index = {}
         self.genes = []
         from . import transit_tools as transit
